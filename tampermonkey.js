@@ -10,7 +10,6 @@
 // @connect      api.openai.com
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
-// @grant        unsafeWindow
 
 // ==/UserScript==
 
