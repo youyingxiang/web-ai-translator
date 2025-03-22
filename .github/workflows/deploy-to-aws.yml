@@ -28,21 +28,30 @@ jobs:
         
         if [ ! -d .git ]; then
           git init
-          git remote add origin git@github.com:youyingxiang/web-ai-translator.git
+          git remote add origin git@github.com:youxingxiang/web-ai-translator.git
         fi
         
         # 拉取最新代码
         git fetch origin main
         git reset --hard origin/main
         
-        # 构建应用
-        echo "安装Go依赖..."
-        go mod download
+        # 检查是否存在 go.mod 文件
+        if [ -f "go.mod" ]; then
+          echo "安装Go依赖..."
+          go mod download || echo "注意: 没有依赖需要下载或已经下载过"
+          echo "初始化Go模块..."
+          go mod tidy || echo "go mod tidy 失败，但继续执行"
+        else
+          echo "警告: 未找到go.mod文件，跳过依赖安装"
+          echo "尝试初始化模块..."
+          go mod init github.com/youxingxiang/web-ai-translator || echo "无法初始化模块，继续执行"
+        fi
+        
         echo "构建Go应用..."
-        go build -o translator
+        go build -o translator || { echo "构建失败"; exit 1; }
         
         # 停止现有服务（如果存在）
-        sudo systemctl stop translator.service || true
+        sudo systemctl stop translator.service || echo "服务未运行或不存在，继续执行"
         
         # 创建或更新systemd服务配置
         sudo tee /etc/systemd/system/translator.service > /dev/null << 'EOSVC'
@@ -100,20 +109,26 @@ jobs:
         sudo ln -sf /etc/nginx/sites-available/web-ai-translator.conf /etc/nginx/sites-enabled/
         
         # 检查Nginx配置
-        sudo nginx -t
+        sudo nginx -t || { echo "Nginx配置错误"; exit 1; }
         
         # 重新加载systemd配置
         sudo systemctl daemon-reload
         
         # 启动服务并设置开机自启
-        sudo systemctl start translator.service
+        sudo systemctl start translator.service || { echo "服务启动失败"; exit 1; }
         sudo systemctl enable translator.service
         
         # 重启Nginx
-        sudo systemctl restart nginx
+        sudo systemctl restart nginx || { echo "Nginx重启失败"; exit 1; }
         
         # 设置文件权限
         sudo chown -R ubuntu:www-data /var/www/web-ai-translator/
         
-        echo "部署完成！"
+        # 验证服务是否正在运行
+        if systemctl is-active --quiet translator.service; then
+          echo "部署成功完成！服务已启动并运行中。"
+        else
+          echo "警告：服务未能正常启动，请检查日志。"
+          journalctl -u translator.service -n 20
+        fi
         EOF

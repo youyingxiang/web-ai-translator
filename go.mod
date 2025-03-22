@@ -1,3 +1,3 @@
-module github.com/yourusername/github-deepseek-translator
+module github.com/youyingxiang/web-ai-translator
 
-go 1.16 
+go 1.22
