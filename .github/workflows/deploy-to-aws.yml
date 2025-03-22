@@ -75,7 +75,7 @@ jobs:
         # 创建Nginx配置
         sudo tee /etc/nginx/sites-available/web-ai-translator.conf > /dev/null << 'EONGINX'
         server {
-            listen 8080;
+            listen 8090;
             server_name _;  # 匹配所有域名，您也可以设置为特定域名
             
             location / {
