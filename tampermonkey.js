@@ -1,21 +1,21 @@
 // ==UserScript==
 // @name         简易网页AI翻译工具
 // @namespace    http://tampermonkey.net/
-// @version      1.0
+// @version      2025-03-22
 // @description  在网页上选中文本后自动翻译成中文
-// @author       AI助手
-// @match        https://github.com/*
+// @author       You
+// @match        https://*/*
+// @icon         data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
-// @connect      *
 // ==/UserScript==
+
 
 (function() {
     'use strict';
     
     // 翻译服务配置
     const CONFIG = {
-        url: 'http://localhost:8080/api/v1/translate', // 翻译服务URL
         model: 'deepseek', // 默认使用的模型
         models: {
             deepseek: {
@@ -215,7 +215,7 @@
             const scrollY = window.pageYOffset || document.documentElement.scrollTop;
             
             showPopup(rect.left + scrollX, rect.bottom + scrollY + 5);
-            setPopupContent('<div>翻译中...</div>');
+            setPopupContent('<div>翻译中...<div class="cursor-blink"></div></div>');
 
             // 获取选定的模型配置
             const modelType = CONFIG.model;
@@ -235,40 +235,47 @@
                 return;
             }
             
-            // 创建请求数据
+            // 创建请求数据（直接请求AI模型）
             const requestData = {
-                text: text,
-                modelType: modelType,
-                apiKey: modelConfig.apiKey,
-                apiUrl: modelConfig.apiUrl,
-                modelName: modelConfig.modelName,
-                systemMsg: modelConfig.systemMsg,
+                model: modelConfig.modelName,
+                messages: [
+                    {
+                        role: "system",
+                        content: modelConfig.systemMsg
+                    },
+                    {
+                        role: "user",
+                        content: text
+                    }
+                ]
             };
             
-            // 发送翻译请求
+            // 直接发送请求到模型API
             GM_xmlhttpRequest({
                 method: 'POST',
-                url: CONFIG.url,
+                url: modelConfig.apiUrl,
                 headers: {
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${modelConfig.apiKey}`
                 },
                 data: JSON.stringify(requestData),
                 timeout: 30000, // 30秒超时
                 onload: function(response) {
                     try {
                         if (response.status !== 200) {
-                            setPopupContent(`<div>服务器错误: ${response.status}</div>`);
-                            console.error('服务器返回错误:', response.status, response.statusText);
+                            setPopupContent(`<div>API错误: ${response.status}</div>`);
+                            console.error('API返回错误:', response.status, response.statusText, response.responseText);
                             isTranslating = false;
                             return;
                         }
                         
                         const result = JSON.parse(response.responseText);
-                        if (result.translation) {
-                            setPopupContent(`<div>${result.translation}</div>`);
+                        if (result.choices && result.choices.length > 0) {
+                            const translation = result.choices[0].message.content.trim();
+                            setPopupContent(`<div>${translation}</div>`);
                         } else {
-                            setPopupContent('<div>翻译失败，请重试。</div>');
-                            console.error('翻译返回结果无效:', result);
+                            setPopupContent('<div>翻译失败，API返回结果无效。</div>');
+                            console.error('API返回结果无效:', result);
                         }
                     } catch (e) {
                         setPopupContent('<div>解析翻译结果失败。</div>');
@@ -278,13 +285,13 @@
                     }
                 },
                 onerror: function(error) {
-                    setPopupContent('<div>连接翻译服务失败，请检查服务是否运行。</div>');
-                    console.error('请求翻译服务失败:', error);
+                    setPopupContent('<div>连接API服务失败。</div>');
+                    console.error('请求API服务失败:', error);
                     isTranslating = false;
                 },
                 ontimeout: function() {
-                    setPopupContent('<div>翻译请求超时，请稍后重试。</div>');
-                    console.error('翻译请求超时');
+                    setPopupContent('<div>API请求超时，请稍后重试。</div>');
+                    console.error('API请求超时');
                     isTranslating = false;
                 }
             });
@@ -315,5 +322,5 @@
         }
     });
     
-    console.log('简易网页AI翻译工具已加载，使用普通翻译模式');
+    console.log('简易网页AI翻译工具已加载，直接请求AI模型API');
 })(); 
