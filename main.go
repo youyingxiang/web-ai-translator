@@ -157,7 +157,7 @@ func homePageHandler(w http.ResponseWriter, r *http.Request) {
 		<title>AI翻译服务</title>
 	</head>
 	<body>
-		<h1>AI翻译服务 服务正在运行中</h1>
+		<h1>AI翻译服务 服务正在运行中!</h1>
 	</body>
 	</html>
 	`)
