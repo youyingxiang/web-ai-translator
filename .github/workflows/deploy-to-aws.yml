@@ -28,7 +28,7 @@ jobs:
         
         if [ ! -d .git ]; then
           git init
-          git remote add origin git@github.com:youyingxiang/diy-web.git
+          git remote add origin git@github.com:youyingxiang/web-ai-translator.git
         fi
         
         # 拉取最新代码
