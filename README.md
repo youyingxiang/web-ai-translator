@@ -11,6 +11,7 @@
 - 即选即译，无需额外操作
 - 简洁的翻译结果弹窗
 - 轻量级设计，无复杂配置
+- 支持自动部署到AWS Elastic Beanstalk
 
 ## 安装步骤
 
@@ -27,30 +28,7 @@ cd web-ai-translator
 go run main.go
 ```
 
-首次运行会自动创建默认配置文件`config.json`，您可以根据需要修改此文件：
-
-```json
-{
-  "port": 8080,
-  "defaultModel": "deepseek",
-  "models": {
-    "deepseek": {
-      "type": "deepseek",
-      "apiKey": "your-api-key-here",
-      "apiUrl": "https://api.deepseek.com/v1/chat/completions",
-      "modelName": "deepseek-chat",
-      "systemMsg": "你是一个翻译助手，请将输入的文本翻译成中文。只返回翻译结果，不要添加额外的解释。"
-    },
-    "openai": {
-      "type": "openai",
-      "apiKey": "your-api-key-here",
-      "apiUrl": "https://api.openai.com/v1/chat/completions",
-      "modelName": "gpt-3.5-turbo",
-      "systemMsg": "你是一个翻译助手，请将输入的文本翻译成中文。只返回翻译结果，不要添加额外的解释。"
-    }
-  }
-}
-```
+服务将在本地8080端口运行，您可以根据需要修改端口号。
 
 ### 2. 安装Tampermonkey浏览器扩展
 
@@ -58,7 +36,8 @@ go run main.go
 2. 打开Tampermonkey控制面板
 3. 点击"创建新脚本"
 4. 将`tampermonkey.js`文件中的内容复制粘贴到编辑器中
-5. 点击"保存"
+5. 修改脚本中的API密钥和其他配置
+6. 点击"保存"
 
 ## 使用方法
 
@@ -70,25 +49,39 @@ go run main.go
 
 ## 配置选项
 
-### Go服务配置
-
-编辑`config.json`文件来配置：
-
-- 服务端口
-- 默认AI模型
-- 各模型的API密钥和URL
-- 系统提示信息
-
 ### Tampermonkey脚本配置
 
-如需修改脚本配置，请直接编辑脚本中的`CONFIG`对象：
+所有配置都在Tampermonkey脚本中进行。请修改脚本中的`CONFIG`对象：
 
 ```javascript
 const CONFIG = {
-    url: 'http://localhost:8080/translate', // 翻译服务URL
-    model: 'deepseek' // 默认使用的模型
+    url: 'http://localhost:8080/api/v1/translate', // 翻译服务URL
+    model: 'deepseek', // 默认使用的模型
+    models: {
+        deepseek: {
+            apiKey: '', // 填入你的 DeepSeek API Key
+            apiUrl: 'https://api.deepseek.com/v1/chat/completions',
+            modelName: 'deepseek-chat',
+            systemMsg: '你是一个翻译助手，请将输入的文本翻译成中文。只返回翻译结果，不要添加额外的解释。'
+        },
+        openai: {
+            apiKey: '', // 填入你的 OpenAI API Key
+            apiUrl: 'https://api.openai.com/v1/chat/completions',
+            modelName: 'gpt-4o',
+            systemMsg: '你是一个翻译助手，请将输入的文本翻译成中文。只返回翻译结果，不要添加额外的解释。'
+        }
+    }
 };
 ```
+
+主要配置选项：
+- `url`：翻译服务的URL，指向您的Go后端服务
+- `model`：默认使用的AI模型（如'deepseek'或'openai'）
+- `models`：各个模型的详细配置
+  - `apiKey`：对应服务的API密钥
+  - `apiUrl`：API服务地址
+  - `modelName`：使用的模型名称
+  - `systemMsg`：系统提示信息
 
 如需限制脚本只在特定网站上运行，请修改脚本头部的`@match`规则。目前默认配置为只在GitHub上运行：
 
@@ -98,11 +91,48 @@ const CONFIG = {
 
 ## 添加新的AI模型
 
-要添加新的AI模型，只需：
+要添加新的AI模型，只需在`tampermonkey.js`的`CONFIG.models`对象中添加相应的模型配置：
 
-1. 在`config.json`中添加新模型配置
-2. 在`main.go`的`translateWithLLMApi`函数中检查是否需要特殊处理
-3. 在`translateWithAI`函数中添加新的case
+```javascript
+models: {
+    // 已有模型配置...
+    new_model: {
+        apiKey: '', // 填入API Key
+        apiUrl: 'https://api.example.com/v1/completions',
+        modelName: 'model-name',
+        systemMsg: '你是一个翻译助手，请将输入的文本翻译成中文。只返回翻译结果，不要添加额外的解释。'
+    }
+}
+```
+
+然后将`CONFIG.model`设置为新模型的名称即可切换使用。
+
+## 部署到AWS
+
+本项目包含GitHub Actions工作流配置，可自动部署后端服务到AWS Elastic Beanstalk。
+
+### 设置步骤
+
+1. 在AWS控制台创建Elastic Beanstalk应用程序和环境
+2. 在GitHub仓库设置以下Secrets:
+   - `AWS_ACCESS_KEY_ID`: AWS访问密钥ID
+   - `AWS_SECRET_ACCESS_KEY`: AWS密钥
+   - `AWS_REGION`: AWS区域（如`us-east-1`）
+   - `EB_APPLICATION_NAME`: Elastic Beanstalk应用程序名称
+   - `EB_ENVIRONMENT_NAME`: Elastic Beanstalk环境名称
+
+设置完成后，每次推送到main分支都会触发自动部署，或者您可以在GitHub Actions页面手动触发部署。
+
+### 更新Tampermonkey脚本配置
+
+部署成功后，请更新Tampermonkey脚本中的URL配置，指向您的AWS Elastic Beanstalk环境URL：
+
+```javascript
+const CONFIG = {
+    url: 'https://your-eb-environment.aws-region.elasticbeanstalk.com/api/v1/translate',
+    // 其他配置...
+};
+```
 
 ## 问题排查
 
@@ -110,8 +140,19 @@ const CONFIG = {
 
 1. Go服务是否正在运行（默认地址为http://localhost:8080）
 2. 浏览器控制台是否有错误信息
-3. AI模型API密钥是否正确
+3. API密钥是否正确填写在脚本中
 4. 是否在Tampermonkey的`@match`规则允许的网站上使用
+5. 如果遇到"API返回错误(状态码:401)"，请检查API密钥是否有效或是否已过期
+
+## 常见错误解决方案
+
+1. **401认证错误** - 通常表示API密钥不正确或已过期，请检查并更新API密钥
+2. **连接服务失败** - 确保本地服务正在运行，或者检查服务URL是否正确
+3. **CSP限制** - 如果遇到内容安全策略限制，请确保Tampermonkey脚本包含以下权限：
+   ```
+   // @grant        GM_xmlhttpRequest
+   // @connect      *
+   ```
 
 ## 注意事项
 
@@ -119,7 +160,8 @@ const CONFIG = {
 - 需要运行后端服务进行翻译
 - 翻译质量依赖于所选AI模型的性能
 - 可以将后端服务部署在任何可访问的服务器上，只需在Tampermonkey脚本中更新服务URL
-- 请确保您拥有API密钥的使用权限，并遵守相应API服务的使用条款
+- 使用公共API服务需要API密钥，请确保遵守相应服务的使用条款
+- 文本长度限制为5000字符，超过部分会被截断
 
 ## 许可证
 

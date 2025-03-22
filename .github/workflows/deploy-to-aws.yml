@@ -1,0 +1,119 @@
+name: Deploy to AWS
+
+on:
+  push:
+    branches:
+      - main  # 只在 main 分支推送时触发
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Install SSH key
+      uses: shimataro/ssh-key-action@v2
+      with:
+        key: ${{ secrets.AWS_SSH_KEY }}
+        known_hosts: 'just-a-placeholder-so-we-dont-get-errors'
+
+    - name: Deploy to AWS
+      run: |
+        ssh -o StrictHostKeyChecking=no ${{ secrets.AWS_USER }}@${{ secrets.AWS_HOST }} << 'EOF'
+
+        # 创建部署目录（如果不存在）
+        sudo mkdir -p /var/www/web-ai-translator
+        cd /var/www/web-ai-translator
+        
+        # 如果没有初始化git，则初始化
+        if [ ! -d .git ]; then
+          git init
+          git remote add origin git@github.com:youxingxiang/web-ai-translator.git
+        fi
+        
+        # 拉取最新代码
+        git fetch origin main
+        git reset --hard origin/main
+        
+        # 构建应用
+        go mod download
+        go build -o translator
+        
+        # 停止现有服务（如果存在）
+        sudo systemctl stop translator.service || true
+        
+        # 创建或更新systemd服务配置
+        sudo tee /etc/systemd/system/translator.service > /dev/null << 'EOSVC'
+        [Unit]
+        Description=Translator Service
+        After=network.target
+
+        [Service]
+        User=${{ secrets.AWS_USER }}
+        WorkingDirectory=/var/www/web-ai-translator
+        ExecStart=/var/www/web-ai-translator/translator
+        Restart=always
+        RestartSec=5
+        # 如果您的Go应用需要特定环境变量，可以在这里添加
+        # Environment=KEY=value
+
+        [Install]
+        WantedBy=multi-user.target
+        EOSVC
+        
+        # 创建Nginx配置
+        sudo tee /etc/nginx/sites-available/web-ai-translator.conf > /dev/null << 'EONGINX'
+        server {
+            listen 8080;
+            server_name _;  # 匹配所有域名，您也可以设置为特定域名
+            
+            location / {
+                proxy_pass http://localhost:8080;  # 假设Go服务运行在8080端口，请根据实际情况调整
+                proxy_http_version 1.1;
+                proxy_set_header Upgrade $http_upgrade;
+                proxy_set_header Connection 'upgrade';
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+                proxy_cache_bypass $http_upgrade;
+            }
+
+            # 添加安全性相关配置
+            # 隐藏Nginx版本信息
+            server_tokens off;
+            
+            # 防止点击劫持
+            add_header X-Frame-Options "SAMEORIGIN";
+            
+            # 启用XSS过滤
+            add_header X-XSS-Protection "1; mode=block";
+        }
+        EONGINX
+        
+        # 删除默认站点（可选）
+        sudo rm -f /etc/nginx/sites-enabled/default
+        
+        # 启用站点配置
+        sudo ln -sf /etc/nginx/sites-available/web-ai-translator.conf /etc/nginx/sites-enabled/
+        
+        # 检查Nginx配置
+        sudo nginx -t
+        
+        # 重新加载systemd配置
+        sudo systemctl daemon-reload
+        
+        # 启动服务并设置开机自启
+        sudo systemctl start translator.service
+        sudo systemctl enable translator.service
+        
+        # 重启Nginx
+        sudo systemctl restart nginx
+        
+        # 设置文件权限
+        sudo chown -R ubuntu:www-data /var/www/web-ai-translator/
+        
+        echo "部署完成！"
+        EOF
