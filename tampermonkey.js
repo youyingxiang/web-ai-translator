@@ -2,12 +2,16 @@
 // @name         简易网页AI翻译工具
 // @namespace    http://tampermonkey.net/
 // @version      2025-03-22
-// @description  在网页上选中文本后自动翻译成中文
+// @description  在网页上选中文本后自动翻译成中文，支持DeepSeek和OpenAI，使用GM_xmlhttpRequest绕过CSP限制
 // @author       You
 // @match        https://*/*
 // @icon         data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==
+// @connect      api.deepseek.com
+// @connect      api.openai.com
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
+// @grant        unsafeWindow
+
 // ==/UserScript==
 
 
@@ -179,6 +183,116 @@
         }
     }
     
+    /**
+     * 处理流式响应数据
+     * @param {string} data - 响应数据
+     */
+    function processStreamData(data) {
+        try {
+            // 如果数据已经是字符串形式的 JSON，直接解析
+            const parsed = JSON.parse(data);
+            if (parsed.choices && parsed.choices.length > 0) {
+                const choice = parsed.choices[0];
+                if (choice.delta && choice.delta.content) {
+                    // 获取内容
+                    const content = choice.delta.content;
+                    console.log('解析到内容:', content);
+                    // 逐字显示内容
+                    displayContentWithDelay(content);
+                }
+            }
+        } catch (e) {
+            console.error('解析 JSON 数据出错:', e);
+        }
+    }
+    
+    // 简单延迟显示队列
+    let displayQueue = [];
+    let isDisplaying = false;
+    
+    /**
+     * 按延迟逐字显示内容
+     * @param {string} content - 要显示的内容
+     */
+    function displayContentWithDelay(content) {
+        // 添加到显示队列
+        const chars = content.split('');
+        displayQueue.push(...chars);
+        
+        // 如果没有显示进行中，开始显示
+        if (!isDisplaying) {
+            displayNextChar();
+        }
+    }
+    
+    /**
+     * 显示队列中的下一个字符
+     */
+    function displayNextChar() {
+        if (displayQueue.length === 0) {
+            isDisplaying = false;
+            return;
+        }
+        
+        isDisplaying = true;
+        
+        // 获取并显示下一个字符
+        const char = displayQueue.shift();
+        appendToPopup(char);
+        
+        // 延迟显示下一个字符
+        setTimeout(displayNextChar, 10);
+    }
+    
+    /**
+     * 将字符附加到弹窗内容
+     * @param {string} char - 要附加的字符
+     */
+    function appendToPopup(char) {
+        if (!popup) return;
+        
+        const contentEl = popup.querySelector('.content');
+        
+        // 移除闪烁光标，如果存在
+        const cursor = contentEl.querySelector('.cursor-blink');
+        if (cursor && cursor.parentNode === contentEl) {
+            contentEl.removeChild(cursor);
+        }
+        
+        // 如果内容是"翻译中..."，则清除
+        if (contentEl.textContent.trim() === '' || contentEl.textContent.trim() === '翻译中...') {
+            contentEl.textContent = '';
+        }
+        
+        // 创建文本节点添加字符
+        const textNode = document.createTextNode(char);
+        contentEl.appendChild(textNode);
+        
+        // 重新添加光标
+        const newCursor = document.createElement('span');
+        newCursor.className = 'cursor-blink';
+        contentEl.appendChild(newCursor);
+        
+        // 自动滚动到底部
+        contentEl.scrollTop = contentEl.scrollHeight;
+    }
+    
+    /**
+     * 完成翻译过程
+     */
+    function finishTranslation() {
+        isTranslating = false;
+        
+        // 移除光标
+        if (popup) {
+            const contentEl = popup.querySelector('.content');
+            const cursor = contentEl.querySelector('.cursor-blink');
+            if (cursor && cursor.parentNode === contentEl) {
+                contentEl.removeChild(cursor);
+            }
+        }
+    }
+    
     // 防抖函数
     function debounce(func, wait) {
         let timeout;
@@ -189,11 +303,15 @@
     }
     
     // 翻译文本函数
-    function translateText(text) {
+    async function translateText(text) {
         if (!text || isTranslating) return;
         
         // 防止重复翻译
         isTranslating = true;
+        
+        // 清空显示队列
+        displayQueue = [];
+        isDisplaying = false;
         
         try {
             // 确保文本长度合理
@@ -247,10 +365,15 @@
                         role: "user",
                         content: text
                     }
-                ]
+                ],
+                stream: true // 始终使用流式响应
             };
             
-            // 直接发送请求到模型API
+            // 使用 GM_xmlhttpRequest 发送请求，它可以绕过CSP限制
+            console.log('使用 GM_xmlhttpRequest 绕过CSP限制');
+            let responseBuffer = '';
+            const textDecoder = new TextDecoder();
+            
             GM_xmlhttpRequest({
                 method: 'POST',
                 url: modelConfig.apiUrl,
@@ -259,39 +382,65 @@
                     'Authorization': `Bearer ${modelConfig.apiKey}`
                 },
                 data: JSON.stringify(requestData),
-                timeout: 30000, // 30秒超时
-                onload: function(response) {
+                responseType: 'arraybuffer', // 使用二进制数据格式
+                onreadystatechange: function(response) {
+                    console.log('onreadystatechange 被调用，readyState:', response.readyState);
+                    
+                    // readyState 3 表示正在接收数据，4 表示完成
+                    if (response.readyState !== 3 && response.readyState !== 4) return;
+                    
                     try {
-                        if (response.status !== 200) {
-                            setPopupContent(`<div>API错误: ${response.status}</div>`);
-                            console.error('API返回错误:', response.status, response.statusText, response.responseText);
-                            isTranslating = false;
-                            return;
+                        if (response.response) {
+                            // 将二进制响应转换为文本
+                            const value = new Uint8Array(response.response);
+                            const newText = textDecoder.decode(value, { stream: true });
+                            
+                            // 计算新增部分
+                            const newData = newText.substring(responseBuffer.length);
+                            responseBuffer = newText;
+                            
+                            // 确保数据不为空
+                            if (!newData) return;
+                            
+                            // 处理新数据（按行拆分处理）
+                            const lines = newData.split('\n');
+                            for (const line of lines) {
+                                if (line.trim() === '') continue;
+                                if (line.startsWith('data: ')) {
+                                    if (line === 'data: [DONE]') continue;
+                                    
+                                    // 直接传递 JSON 内容字符串给 processStreamData
+                                    const content = line.substring(6);
+                                    processStreamData(content);
+                                }
+                            }
                         }
                         
-                        const result = JSON.parse(response.responseText);
-                        if (result.choices && result.choices.length > 0) {
-                            const translation = result.choices[0].message.content.trim();
-                            setPopupContent(`<div>${translation}</div>`);
-                        } else {
-                            setPopupContent('<div>翻译失败，API返回结果无效。</div>');
-                            console.error('API返回结果无效:', result);
+                        // 如果请求完成，调用finishTranslation
+                        if (response.readyState === 4) {
+                            console.log('请求完成');
+                            finishTranslation();
+                            
+                            // 检查状态码
+                            if (response.status !== 200) {
+                                setPopupContent(`<div>翻译失败: API返回错误 ${response.status}</div>`);
+                                isTranslating = false;
+                            }
                         }
                     } catch (e) {
-                        setPopupContent('<div>解析翻译结果失败。</div>');
-                        console.error('解析翻译结果失败:', e, response.responseText);
-                    } finally {
-                        isTranslating = false;
+                        console.error('处理响应数据时出错:', e);
+                    }
+                },
+                onload: function(response) {
+                    console.log('onload 被调用');
+                    // 备用完成处理，以防onreadystatechange没有正确触发完成事件
+                    if (isTranslating) {
+                        finishTranslation();
                     }
                 },
                 onerror: function(error) {
-                    setPopupContent('<div>连接API服务失败。</div>');
-                    console.error('请求API服务失败:', error);
-                    isTranslating = false;
-                },
-                ontimeout: function() {
-                    setPopupContent('<div>API请求超时，请稍后重试。</div>');
-                    console.error('API请求超时');
+                    console.error('API请求失败:', error);
+                    setPopupContent(`<div>翻译失败: ${error.statusText || '请求错误'}</div>`);
                     isTranslating = false;
                 }
             });
@@ -322,5 +471,5 @@
         }
     });
     
-    console.log('简易网页AI翻译工具已加载，直接请求AI模型API');
+    console.log('简易网页AI翻译工具已加载，使用GM_xmlhttpRequest绕过CSP限制');
 })(); 
