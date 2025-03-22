@@ -22,15 +22,13 @@ jobs:
     - name: Deploy to AWS
       run: |
         ssh -o StrictHostKeyChecking=no ${{ secrets.AWS_USER }}@${{ secrets.AWS_HOST }} << 'EOF'
-
         # 创建部署目录（如果不存在）
         sudo mkdir -p /var/www/web-ai-translator
         cd /var/www/web-ai-translator
         
-        # 如果没有初始化git，则初始化
         if [ ! -d .git ]; then
           git init
-          git remote add origin git@github.com:youxingxiang/web-ai-translator.git
+          git remote add origin git@github.com:youyingxiang/diy-web.git
         fi
         
         # 拉取最新代码
@@ -38,7 +36,9 @@ jobs:
         git reset --hard origin/main
         
         # 构建应用
+        echo "安装Go依赖..."
         go mod download
+        echo "构建Go应用..."
         go build -o translator
         
         # 停止现有服务（如果存在）

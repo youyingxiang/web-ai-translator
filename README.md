@@ -107,32 +107,6 @@ models: {
 
 然后将`CONFIG.model`设置为新模型的名称即可切换使用。
 
-## 部署到AWS
-
-本项目包含GitHub Actions工作流配置，可自动部署后端服务到AWS Elastic Beanstalk。
-
-### 设置步骤
-
-1. 在AWS控制台创建Elastic Beanstalk应用程序和环境
-2. 在GitHub仓库设置以下Secrets:
-   - `AWS_ACCESS_KEY_ID`: AWS访问密钥ID
-   - `AWS_SECRET_ACCESS_KEY`: AWS密钥
-   - `AWS_REGION`: AWS区域（如`us-east-1`）
-   - `EB_APPLICATION_NAME`: Elastic Beanstalk应用程序名称
-   - `EB_ENVIRONMENT_NAME`: Elastic Beanstalk环境名称
-
-设置完成后，每次推送到main分支都会触发自动部署，或者您可以在GitHub Actions页面手动触发部署。
-
-### 更新Tampermonkey脚本配置
-
-部署成功后，请更新Tampermonkey脚本中的URL配置，指向您的AWS Elastic Beanstalk环境URL：
-
-```javascript
-const CONFIG = {
-    url: 'https://your-eb-environment.aws-region.elasticbeanstalk.com/api/v1/translate',
-    // 其他配置...
-};
-```
 
 ## 问题排查
 
